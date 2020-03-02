@@ -2,7 +2,7 @@ extern "wapc" fn __guest_request(operation_ptr: [*]u8, payload_ptr: [*]u8) void;
 extern "wapc" fn __guest_response(ptr: [*]u8, len: usize) void;
 extern "wapc" fn __guest_error(ptr: [*]u8, len: usize) void;
 
-extern "wapc" fn __host_call(operation_ptr: [*]u8, operation_len: usize, payload_ptr: [*]u8, payload_len: usize) bool;
+extern "wapc" fn __host_call(namespace_ptr: [*]u8, namespace_len: usize, operation_ptr: [*]u8, operation_len: usize, payload_ptr: [*]u8, payload_len: usize) bool;
 extern "wapc" fn __host_response_len() usize;
 extern "wapc" fn __host_response(ptr: [*]u8) void;
 extern "wapc" fn __host_error_len() usize;
@@ -49,8 +49,8 @@ pub fn handleCall(operation_size: usize, payload_size: usize, fns: []Function) b
     return false;
 }
 
-pub fn hostCall(allocator: *mem.Allocator, operation: []u8, payload: []u8) ![]u8 {
-    const result = __host_call(operation.ptr, operation.len, payload.ptr, payload.len);
+pub fn hostCall(allocator: *mem.Allocator, namespace: []u8, operation: []u8, payload: []u8) ![]u8 {
+    const result = __host_call(namespace.ptr, namespace.len, operation.ptr, operation.len, payload.ptr, payload.len);
     if (!result) {
         const errorLen = __host_error_len();
         const errorPrefix = "Host error: ";
