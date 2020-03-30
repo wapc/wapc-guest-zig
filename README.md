@@ -21,7 +21,7 @@ var functions = [_]wapc.Function{
 };
 
 fn sayHello(allocator: *mem.Allocator, payload: []u8) ![]u8 {
-    const hostHello = try wapc.hostCall(allocator, &"sample", &"hello", &"Simon");
+    const hostHello = try wapc.hostCall(allocator, &"myBinding", &"sample", &"hello", &"Simon");
     const prefix = "Hello, ";
     const message = try allocator.alloc(u8, prefix.len + payload.len + hostHello.len + 1);
     mem.copy(u8, message, &prefix);
