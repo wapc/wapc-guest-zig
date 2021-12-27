@@ -2,7 +2,7 @@ extern "wapc" fn __guest_request(operation_ptr: [*]u8, payload_ptr: [*]u8) void;
 extern "wapc" fn __guest_response(ptr: [*]u8, len: usize) void;
 extern "wapc" fn __guest_error(ptr: [*]u8, len: usize) void;
 
-extern "wapc" fn __host_call(binding_ptr: [*]u8, binding_len: usize, namespace_ptr: [*]u8, namespace_len: usize, operation_ptr: [*]u8, operation_len: usize, payload_ptr: [*]u8, payload_len: usize) bool;
+extern "wapc" fn __host_call(binding_ptr: [*]const u8, binding_len: usize, namespace_ptr: [*]const u8, namespace_len: usize, operation_ptr: [*]const u8, operation_len: usize, payload_ptr: [*]const u8, payload_len: usize) bool;
 extern "wapc" fn __host_response_len() usize;
 extern "wapc" fn __host_response(ptr: [*]u8) void;
 extern "wapc" fn __host_error_len() usize;
@@ -17,7 +17,7 @@ pub const Function = struct {
     invoke: fn (
         allocator: mem.Allocator,
         payload: []u8,
-    ) anyerror![]u8,
+    ) anyerror!?[]u8,
 };
 
 fn guestError(allocator: mem.Allocator, err: anyerror) !void {
@@ -47,11 +47,16 @@ pub fn handleCall(allocator: mem.Allocator, operation_size: usize, payload_size:
 
     inline for (fns) |function| {
         if (mem.eql(u8, operation_buf, function.name)) {
-            const response = function.invoke(allocator, payload_buf) catch |err| {
+            const response_maybe = function.invoke(allocator, payload_buf) catch |err| {
                 guestError(allocator, err) catch return false;
                 return false;
             };
-            __guest_response(response.ptr, response.len);
+            if (response_maybe) |response| {
+                defer allocator.free(response);
+                __guest_response(response.ptr, response.len);
+            } else {
+                __guest_response(@intToPtr([*]u8, 1), 0);
+            }
             return true;
         }
     }
@@ -60,23 +65,25 @@ pub fn handleCall(allocator: mem.Allocator, operation_size: usize, payload_size:
     return false;
 }
 
-pub fn hostCall(allocator: mem.Allocator, binding: []u8, namespace: []u8, operation: []u8, payload: []u8) ![]u8 {
+pub fn hostCall(allocator: mem.Allocator, binding: []const u8, namespace: []const u8, operation: []const u8, payload: []const u8) ![]u8 {
     const result = __host_call(binding.ptr, binding.len, namespace.ptr, namespace.len, operation.ptr, operation.len, payload.ptr, payload.len);
     if (!result) {
-        const errorLen = __host_error_len();
-        const errorPrefix = "Host error: ";
-        const message = allocator.alloc(u8, errorPrefix.len + errorLen) catch return error.HostError;
-        defer allocator.free(message);
-
-        mem.copy(u8, message, &errorPrefix);
-        __host_error(message.ptr + errorPrefix.len);
-        __guest_error(message.ptr, message.len);
-
+        var message = std.ArrayList(u8).init(allocator);
+        defer message.deinit();
+        try message.appendSlice("Host error: ");
+        // ask the host what happened
+        const error_len = __host_error_len();
+        const host_message = try allocator.alloc(u8, error_len);
+        defer allocator.free(host_message);
+        __host_error(host_message.ptr);
+        try message.appendSlice(host_message);
+        // echo back the host error from the guest
+        __guest_error(@ptrCast([*]u8, message.items), message.items.len);
         return error.HostError;
     }
 
-    const responseLen = __host_response_len();
-    const response = try allocator.alloc(u8, responseLen);
+    const response_len = __host_response_len();
+    const response = try allocator.alloc(u8, response_len);
     __host_response(response.ptr);
 
     return response;
